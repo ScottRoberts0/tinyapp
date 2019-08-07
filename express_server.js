@@ -3,6 +3,9 @@ const app = express();
 const PORT = 8080;
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
+const bcrypt = require('bcrypt');
+const password = "purple-monkey-dinosaur"; // found in the req.params object
+const hashedPassword = bcrypt.hashSync(password, 10);
 
 app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -130,8 +133,9 @@ app.post("/login", (req, res) => {
   if(!emailLookup(users, email)){
     res.status(403).send("403 ERROR: Email not found!");
   }else{
-  let id = findID(email, pass);
-  if(id){
+  let id = findID(email);
+ 
+  if(id && bcrypt.compareSync(pass, users[id].password)){
     res.cookie('user_id', id);
     res.redirect("/urls");
   }else{
@@ -151,7 +155,8 @@ app.get("/register", (req, res) => {
 app.post("/register", (req, res) => {
   const newUserID = generateRandomString();
   const newUserEmail = req.body.email;
-  const newUserPass = req.body.password;
+  //hashed password
+  const newUserPass = bcrypt.hashSync(req.body.password, 10);
 
   if (!newUserEmail || !newUserPass) {
     res.status(400).send("Error 400, Email and Password fields cannot be left blank");
@@ -196,10 +201,10 @@ function emailLookup(userObj, userEmail) {
   return false;
 };
 
-function findID(email, pass){
+function findID(email){
   
   for(let key in users){
-    if(users[key].email === email && users[key].password === pass){
+    if(users[key].email === email){
       return key;
     }
   }
