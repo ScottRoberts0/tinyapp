@@ -16,6 +16,7 @@
       </div>
     <div class="card-footer text-muted">
         <!-- Edit URL Form -->
+       <% if(user) { %>
         <form class="form-inline" action="/urls/<%= shortURL %>" method="POST" style="width: 400px;margin: 0 auto">
           <div class="form-groupr mb-2">
               <h1>Edit</h1>
@@ -24,6 +25,7 @@
             <button type="submit" class="btn btn-primary">Submit</button>
           </div>
         </form>
+    <% } %>
     </div>
   </div>
   <!-- Bootstrap JS -->
