@@ -5,11 +5,12 @@ const bodyParser = require("body-parser");
 const cookieSession = require('cookie-session')
 const bcrypt = require('bcrypt');
 const { generateRandomString, emailLookup, getUserByEmail, urlsForUser } = require('./helpers');
-
 const cookieParser = require('cookie-parser');
 
-
+//Sets Up EJS
 app.set("view engine", "ejs");
+
+//Middleware
 app.use(cookieSession({
   name: 'session',
   keys: ['key1', 'key2'],
@@ -18,12 +19,13 @@ app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static("public"));
 
-//GLOBAL OBJECTS
+//GLOBAL OBJECTS 
 const urlDatabase = {
   b6UTxQ: { longURL: "https://www.tsn.ca", userID: "aJ48lW", dateCreated: "19-10-2018", totalVisits: 0, uniqueVisits: 0, visitTracker: [] },
   i3BoGr: { longURL: "https://www.google.ca", userID: "jJ48lW", dateCreated: "10-03-2016", totalVisits: 0, uniqueVisits: 0, visitTracker: [] },
 };
 
+//FOR TESTING PURPOSES, DELETE IN PRODUCTION
 const users = {
   "aJ48lW": {
     id: "aJ48lW",
@@ -35,16 +37,11 @@ const users = {
     email: "user2@example.com",
     password: bcrypt.hashSync("dishwasher-funk", 10)
   }
-}
+};
 
-
-//GET AND POST REQUESTS
+//GET REQUESTS
 app.get("/", (req, res) => {
-  if (req.session.user_id) {
-    res.redirect("/urls");
-  } else {
-    res.redirect("/login");
-  }
+  (req.session.user_id)? res.redirect("/urls"): res.redirect("/login");
 });
 
 app.get("/urls", (req, res) => {
@@ -63,6 +60,7 @@ app.get("/urls", (req, res) => {
       msg: "Access Denied. User Not Logged In",
       user: users[req.session.user_id]
     };
+
     res.status(503).render("error_page", templateVars);
   }
 });
@@ -87,7 +85,7 @@ app.get("/urls/:shortURL", (req, res) => {
     if (!users[req.session.user_id]) {
       res.status(401).render("error_page", { error: 404, msg: "Not Signed In", user: users[req.session.user_id] });
     }
-    if (urlDatabase[req.params.shortURL].userID !== req.session.user_id){
+    if (urlDatabase[req.params.shortURL].userID !== req.session.user_id) {
       res.status(401).render("error_page", { error: 404, msg: "Not Authorized", user: users[req.session.user_id] });
     }
     let templateVars = {
@@ -102,44 +100,42 @@ app.get("/urls/:shortURL", (req, res) => {
   }
 });
 
-app.get("/urls.json", (req, res) => {
-  res.json(urlDatabase);
-});
 
 app.get("/u/:shortURL", (req, res) => {
   if (urlDatabase[req.params.shortURL] === undefined) {
     res.status(404).render("error_page", { error: 404, msg: "ShortURL does not exist", user: users[req.session.user_id] });
-  }else{
-  const longURL = urlDatabase[req.params.shortURL].longURL;
-  const url = req.params.shortURL;
-  if (!req.cookies[url]) {
-    res.cookie(url, "visited");
-    urlDatabase[req.params.shortURL].uniqueVisits += 1;
+  } else {
+    const longURL = urlDatabase[req.params.shortURL].longURL;
+    const url = req.params.shortURL;
+
+    if (!req.cookies[url]) {
+      res.cookie(url, "visited");
+      urlDatabase[req.params.shortURL].uniqueVisits += 1;
+    }
+    //Adds a new visit to the visitTracker array in the urlDatabase object
+    const visitorID = generateRandomString();
+    const date = new Date();
+    const utcDate = date.toUTCString();
+    urlDatabase[req.params.shortURL].visitTracker.push([visitorID, utcDate]);
+    urlDatabase[req.params.shortURL].totalVisits += 1;
+    
+    res.redirect(longURL);
   }
-
-
-  const visitorID = generateRandomString();
-  const date = new Date();
-  const utcDate = date.toUTCString();
-
-  urlDatabase[req.params.shortURL].visitTracker.push([visitorID, utcDate]);
-
-
-
-  urlDatabase[req.params.shortURL].totalVisits += 1;
-  res.redirect(longURL);
-}
 });
 
-app.get("/hello", (req, res) => {
-  res.send("<html><body>Hello <b>World</b></body></html>\n");
+app.get("/login", (req, res) => {
+  let templateVars = {
+    user: users[req.session.user_id]
+  };
+  res.render("user_login", templateVars);
 });
 
+//POST REQUESTS
 app.post("/urls", (req, res) => {
   if (!users[req.session.user_id]) {
     res.status(401).render("error_page", { error: 404, msg: "Not Signed In", user: users[req.session.user_id] });
   }
-  
+
   const longUrl = req.body.longURL;
   const randomKey = generateRandomString();
   let current_datetime = new Date()
@@ -156,32 +152,6 @@ app.post("/urls", (req, res) => {
     }
 
   res.redirect("/urls/" + randomKey);
-});
-
-app.post("/logout", (req, res) => {
-  req.session = null;
-  res.redirect("/urls");
-});
-
-app.post("/urls/:id", (req, res) => {
-  if (req.session.user_id === urlDatabase[req.params.id].userID) {
-    urlDatabase[req.params.id].longURL = req.body.longURL;
-  }
-  res.redirect("/urls");
-});
-
-app.post("/urls/:shortURL/delete", (req, res) => {
-  if (req.session.user_id === urlDatabase[req.params.shortURL].userID) {
-    delete urlDatabase[req.params.shortURL];
-  }
-  res.redirect("/urls");
-});
-
-app.get("/login", (req, res) => {
-  let templateVars = {
-    user: users[req.session.user_id]
-  };
-  res.render("user_login", templateVars);
 });
 
 app.post("/login", (req, res) => {
@@ -207,7 +177,6 @@ app.get("/register", (req, res) => {
     user: users[req.session.user_id]
   };
   res.render("user_register", templateVars);
-
 });
 
 app.post("/register", (req, res) => {
@@ -226,10 +195,28 @@ app.post("/register", (req, res) => {
       email: newUserEmail,
       password: newUserPass
     }
-
     req.session.user_id = newUserID;
     res.redirect("/urls");
   }
+});
+
+app.post("/logout", (req, res) => {
+  req.session = null;
+  res.redirect("/urls");
+});
+
+app.post("/urls/:id", (req, res) => {
+  if (req.session.user_id === urlDatabase[req.params.id].userID) {
+    urlDatabase[req.params.id].longURL = req.body.longURL;
+  }
+  res.redirect("/urls");
+});
+
+app.post("/urls/:shortURL/delete", (req, res) => {
+  if (req.session.user_id === urlDatabase[req.params.shortURL].userID) {
+    delete urlDatabase[req.params.shortURL];
+  }
+  res.redirect("/urls");
 });
 
 //SERVER LISTENER
