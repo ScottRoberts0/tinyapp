@@ -2,83 +2,104 @@ const express = require('express');
 const app = express();
 const PORT = 8080;
 const bodyParser = require("body-parser");
-const cookieParser = require("cookie-parser");
+const cookieSession = require('cookie-session')
 const bcrypt = require('bcrypt');
-const password = "purple-monkey-dinosaur"; // found in the req.params object
-const hashedPassword = bcrypt.hashSync(password, 10);
+const { generateRandomString, emailLookup, getUserByEmail, urlsForUser } = require('./helpers');
 
+const cookieParser = require('cookie-parser');
+
+
+app.set("view engine", "ejs");
+app.use(cookieSession({
+  name: 'session',
+  keys: ['key1', 'key2'],
+}));
 app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.set("view engine", "ejs");
 app.use(express.static("public"));
 
 //GLOBAL OBJECTS
 const urlDatabase = {
-  b6UTxQ: { longURL: "https://www.tsn.ca", userID: "aJ48lW" },
-  i3BoGr: { longURL: "https://www.google.ca", userID: "jJ48lW" }
+  b6UTxQ: { longURL: "https://www.tsn.ca", userID: "aJ48lW", dateCreated: "19-10-2018", totalVisits: 0, uniqueVisits: 0, visitTracker: [] },
+  i3BoGr: { longURL: "https://www.google.ca", userID: "jJ48lW", dateCreated: "10-03-2016", totalVisits: 0, uniqueVisits: 0, visitTracker: [] },
 };
 
 const users = {
   "aJ48lW": {
     id: "aJ48lW",
     email: "user@example.com",
-    password: "purple-monkey-dinosaur"
+    password: bcrypt.hashSync("purple-monkey-dinosaur", 10)
   },
   "user2RandomID": {
     id: "user2RandomID",
     email: "user2@example.com",
-    password: "dishwasher-funk"
+    password: bcrypt.hashSync("dishwasher-funk", 10)
   }
 }
 
+
 //GET AND POST REQUESTS
 app.get("/", (req, res) => {
-  res.send("Hello!");
+  if (req.session.user_id) {
+    res.redirect("/urls");
+  } else {
+    res.redirect("/login");
+  }
 });
 
 app.get("/urls", (req, res) => {
-
- 
-  if(req.cookies["user_id"]){  
-
-
-    let urlsList = urlsForUser(req.cookies["user_id"]);
+  if (req.session.user_id) {
+    let urlsList = urlsForUser(req.session.user_id, urlDatabase);
 
     let templateVars = {
-    urls: urlsList,
-    user: users[req.cookies["user_id"]]
+      urls: urlsList,
+      user: users[req.session.user_id]
     };
 
-  res.render("urls_index", templateVars);
-  }else{
-
-  let templateVars = {
-    urls: {},
-    user: users[req.cookies["user_id"]]
-    };
     res.render("urls_index", templateVars);
+  } else {
+    let templateVars = {
+      error: 503,
+      msg: "Access Denied. User Not Logged In",
+      user: users[req.session.user_id]
+    };
+    res.status(503).render("error_page", templateVars);
   }
 });
 
 app.get("/urls/new", (req, res) => {
   let templateVars = {
-    user: users[req.cookies["user_id"]]
+    user: users[req.session.user_id]
   };
 
-  if(req.cookies["user_id"]){
+  if (req.session.user_id) {
     res.render("urls_new", templateVars);
-  }else{
+  } else {
     res.redirect("/login");
   }
 });
 
 app.get("/urls/:shortURL", (req, res) => {
-  let templateVars = {
-    shortURL: req.params.shortURL,
-    longURL: urlDatabase[req.params.shortURL].longURL,
-    user: users[req.cookies["user_id"]]
-  };
-  res.render("urls_show", templateVars);
+
+  if (urlDatabase[req.params.shortURL] === undefined) {
+    res.status(404).render("error_page", { error: 404, msg: "URL not FOUND", user: users[req.session.user_id] });
+  } else {
+    if (!users[req.session.user_id]) {
+      res.status(401).render("error_page", { error: 404, msg: "Not Signed In", user: users[req.session.user_id] });
+    }
+    if (urlDatabase[req.params.shortURL].userID !== req.session.user_id){
+      res.status(401).render("error_page", { error: 404, msg: "Not Authorized", user: users[req.session.user_id] });
+    }
+    let templateVars = {
+      shortURL: req.params.shortURL,
+      longURL: urlDatabase[req.params.shortURL].longURL,
+      user: users[req.session.user_id],
+      visits: urlDatabase[req.params.shortURL].totalVisits,
+      uniqueVisits: urlDatabase[req.params.shortURL].uniqueVisits,
+      visitList: urlDatabase[req.params.shortURL].visitTracker
+    };
+    res.render("urls_show", templateVars);
+  }
 });
 
 app.get("/urls.json", (req, res) => {
@@ -86,8 +107,28 @@ app.get("/urls.json", (req, res) => {
 });
 
 app.get("/u/:shortURL", (req, res) => {
+  if (urlDatabase[req.params.shortURL] === undefined) {
+    res.status(404).render("error_page", { error: 404, msg: "ShortURL does not exist", user: users[req.session.user_id] });
+  }else{
   const longURL = urlDatabase[req.params.shortURL].longURL;
+  const url = req.params.shortURL;
+  if (!req.cookies[url]) {
+    res.cookie(url, "visited");
+    urlDatabase[req.params.shortURL].uniqueVisits += 1;
+  }
+
+
+  const visitorID = generateRandomString();
+  const date = new Date();
+  const utcDate = date.toUTCString();
+
+  urlDatabase[req.params.shortURL].visitTracker.push([visitorID, utcDate]);
+
+
+
+  urlDatabase[req.params.shortURL].totalVisits += 1;
   res.redirect(longURL);
+}
 });
 
 app.get("/hello", (req, res) => {
@@ -95,33 +136,50 @@ app.get("/hello", (req, res) => {
 });
 
 app.post("/urls", (req, res) => {
+  if (!users[req.session.user_id]) {
+    res.status(401).render("error_page", { error: 404, msg: "Not Signed In", user: users[req.session.user_id] });
+  }
+  
   const longUrl = req.body.longURL;
   const randomKey = generateRandomString();
-  urlDatabase[randomKey] = longUrl;
+  let current_datetime = new Date()
+  let formatted_date = current_datetime.getDate() + "-" + (current_datetime.getMonth() + 1) + "-" + current_datetime.getFullYear()
+
+  const userName =
+    urlDatabase[randomKey] = {
+      longURL: longUrl,
+      userID: req.session.user_id,
+      dateCreated: formatted_date,
+      totalVisits: 0,
+      uniqueVisits: 0,
+      visitTracker: []
+    }
+
   res.redirect("/urls/" + randomKey);
 });
 
 app.post("/logout", (req, res) => {
-  res.clearCookie("user_id");
+  req.session = null;
   res.redirect("/urls");
 });
 
 app.post("/urls/:id", (req, res) => {
-  if(req.cookies["user_id"] === urlDatabase[req.params.id].userID){
-   urlDatabase[req.params.id].longURL = req.body.longURL;
+  if (req.session.user_id === urlDatabase[req.params.id].userID) {
+    urlDatabase[req.params.id].longURL = req.body.longURL;
   }
   res.redirect("/urls");
 });
 
 app.post("/urls/:shortURL/delete", (req, res) => {
-  if(req.cookies["user_id"] === urlDatabase[req.params.shortURL].userID){
+  if (req.session.user_id === urlDatabase[req.params.shortURL].userID) {
     delete urlDatabase[req.params.shortURL];
   }
   res.redirect("/urls");
 });
+
 app.get("/login", (req, res) => {
   let templateVars = {
-    user: users[req.cookies["user_id"]]
+    user: users[req.session.user_id]
   };
   res.render("user_login", templateVars);
 });
@@ -129,24 +187,24 @@ app.get("/login", (req, res) => {
 app.post("/login", (req, res) => {
   const email = req.body.email;
   const pass = req.body.password;
-  console.log(req.body);
-  if(!emailLookup(users, email)){
+
+  if (!emailLookup(email, users)) {
     res.status(403).send("403 ERROR: Email not found!");
-  }else{
-  let id = findID(email);
- 
-  if(id && bcrypt.compareSync(pass, users[id].password)){
-    res.cookie('user_id', id);
-    res.redirect("/urls");
-  }else{
-    res.status(403).send("403 ERROR: UID not found or password incorrect");
-  }
+  } else {
+    let id = getUserByEmail(email, users);
+
+    if (id && bcrypt.compareSync(pass, users[id].password)) {
+      req.session.user_id = id;
+      res.redirect("/urls");
+    } else {
+      res.status(403).send("403 ERROR: UID not found or password incorrect");
+    }
   }
 });
 
 app.get("/register", (req, res) => {
   let templateVars = {
-    user: users[req.cookies["user_id"]]
+    user: users[req.session.user_id]
   };
   res.render("user_register", templateVars);
 
@@ -160,7 +218,7 @@ app.post("/register", (req, res) => {
 
   if (!newUserEmail || !newUserPass) {
     res.status(400).send("Error 400, Email and Password fields cannot be left blank");
-  } else if (emailLookup(users, newUserEmail)){
+  } else if (emailLookup(newUserEmail, users)) {
     res.status(400).send(" Error 400, This email address is already registered");
   } else {
     users[newUserID] = {
@@ -169,8 +227,7 @@ app.post("/register", (req, res) => {
       password: newUserPass
     }
 
-    console.log(users);
-    res.cookie('user_id', newUserID);
+    req.session.user_id = newUserID;
     res.redirect("/urls");
   }
 });
@@ -179,44 +236,3 @@ app.post("/register", (req, res) => {
 app.listen(PORT, () => {
   console.log(`Example app listening on port ${PORT}`);
 });
-
-//RANDOM STRING GENERATOR
-function generateRandomString() {
-  let str = "";
-  let characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-
-  for (let i = 0; i < 6; i++) {
-    str += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return str;
-};
-
-function emailLookup(userObj, userEmail) {
-  const keys = Object.keys(userObj);
-  for (const key of keys) {
-    if (userObj[key].email === userEmail) {
-      return true;
-    }
-  }
-  return false;
-};
-
-function findID(email){
-  
-  for(let key in users){
-    if(users[key].email === email){
-      return key;
-    }
-  }
-  return undefined;
-}
-
-function urlsForUser(id){
-let urlsList = {};
-  for(let key in urlDatabase){
-    if(urlDatabase[key].userID === id){
-      urlsList[key] = urlDatabase[key];
-    }
-  }
-return urlsList;
-}
