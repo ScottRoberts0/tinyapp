@@ -1,3 +1,5 @@
+//To whomever has to read this code, I'm sorry. Please accept my offering of a cute cat picture in the link below.
+// https://data.whicdn.com/images/298844185/large.jpg?t=1507433077
 const express = require('express');
 const app = express();
 const PORT = 8080;
